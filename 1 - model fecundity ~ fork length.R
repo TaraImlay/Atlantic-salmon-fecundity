@@ -1197,7 +1197,7 @@ set3 %>%
 
 
 
-# TABLE S2 ----------------------------------------------------------------
+# TABLE S3 ----------------------------------------------------------------
 
 # 1. get coefficients for two models
 coefM4 <- distinct(fecundity, RIVER_NO, RIVER) %>% 
@@ -1235,11 +1235,13 @@ mutate(coefM4, across(where(is.numeric), ~round(., 2)),
 posterior_summary(M4Se) %>% data.frame() %>% rownames_to_column(var = "coef") %>% 
   filter(grepl("STAGE_EGG_COUNT|fRAGE|LAST_SPAWN|FULTONS_K|SAMPLE_DOY", coef)) %>% 
   mutate(across(where(is.numeric), ~round(., 2)),
-         coef = case_when(coef == "b_STAGE_EGG_COUNTmature"          ~ "βm = mature =",
-                          coef == "b_STAGE_EGG_COUNTmaturePretained" ~ "βm = mature + retained =",
-                          coef == "b_STAGE_EGG_COUNTmature"          ~ "βm = mature =",
-                          coef == "b_cFULTONS_K"                     ~ "βk =",
-                          coef == "b_cSAMPLE_DOY"                    ~ "βt =",
+         coef = case_when(coef == "b_STAGE_EGG_COUNTmature"             ~ "βm = mature =",
+                          coef == "b_STAGE_EGG_COUNTmaturePretained"    ~ "βm = mature + retained =",
+                          coef == "b_STAGE_EGG_COUNTmature"             ~ "βm = mature =",
+                          coef == "b_cFULTONS_K"                        ~ "βk =",
+                          coef == "b_cSAMPLE_DOY"                       ~ "βt =",
+                          coef == "b_STAGE_EGG_COUNTmature:cSAMPLE_DOY" ~ "βt,mature =",
+                          coef == "b_STAGE_EGG_COUNTmaturePretained:cSAMPLE_DOY" ~ "βt,mature + retained =",
                           grepl("fRAGE", coef)      ~ paste0("βa = ", str_sub(coef, -1, -1), " = "),
                           grepl("LAST_SPAWN", coef) ~ paste0("βp = ", str_sub(coef, -1, -1), " = ")),
        β = paste0(Estimate, " (", Est.Error, ")")) %>%
