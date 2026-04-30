@@ -34,27 +34,18 @@ theme_update(panel.grid   = element_blank(),
 pal11 <- scales::viridis_pal(option = "plasma")(11)
 pal3  <- scales::viridis_pal(option = "plasma", end = 0.8)(3)
 
-
 # 4. import raw dataset and select needed columns
-fecundityRaw <- readRDS(
-  "C:/Users/IMLAYT/OneDrive - DFO-MPO/Atlantic salmon body size project/MS fecundity/Analysis/fecundity.rds") %>% 
-  select(DU, RIVER_NO, RIVER, YEAR, LATITUDE, LONGITUDE, EGG_COUNT_COR, 
-         EGG_COUNT_RETAIN, EGG_DIAM_COR, STAGE_EGG_COUNT, FORK_LENGTH, SIZE, 
-         RAGE, LAST_SPAWN, FULTONS_K, COLLECT_DOY, SAMPLE_DOY, STRIP_DOY,
-         SAMPLE_DATE_RANGE, CITATION) %>% 
-  droplevels()
-saveRDS(fecundityRaw, "data - fecundity.rds")
+fecundityRaw <- read.csv("https://osf.io/hwrmy/download")
 
-# 6. set priors for models
+# 5. set priors for models
 priorList <- c(prior(normal(0, 10), class = b, coef = "Intercept"), # explicitly set prior for non-centered intercept
                prior(normal(0, 1),  class = b),
                prior(normal(0, 1),  class = sd),
                prior(normal(0, 1),  class = sigma),
                prior(lkj(2),        class = cor))
 
-# 7. allow for parallel processing
+# 6. allow for parallel processing
 options(mc.cores = parallel::detectCores())
-
 
 
 
@@ -117,9 +108,7 @@ filter(fecundityRaw, SAMPLE_DATE_RANGE > 1) %>%
   group_by(RIVER_NO, RIVER) %>% 
   summarise(nMid = sum(SAMPLE_DATE_RANGE > 1), 
             minSD = min(SAMPLE_DATE_RANGE), 
-            maxSD = max(SAMPLE_DATE_RANGE)) #%>% 
-  filter(maxSD > 1)
-names(fecundityRaw)
+            maxSD = max(SAMPLE_DATE_RANGE))
 
 # 3. NL rivers compare fecundity relationships & egg retention rates
 # 3. a) compare relationships for Rocky River & Flat Bay Brook
@@ -130,29 +119,13 @@ filter(fecundityRaw, STAGE_EGG_COUNT == "mature + retained") %>%
   group_by(RIVER) %>% summarise(n = n(), nRet = sum(!is.na(EGG_COUNT_RETAIN))) %>% 
   summarise(sum(nRet), sum(n), sum(nRet)/sum(n))
 # 3. c) calculate proportion of retained eggs in fecundity value
-filter(fecundityRaw, !is.na(EGG_COUNT_RETAIN), STAGE_EGG_COUNT != "immature") %>%   ### DOUBLE CHECK THAT CONNE IMMATURE EGGS ARE NOT INCLUDED!!!!
+filter(fecundityRaw, !is.na(EGG_COUNT_RETAIN), STAGE_EGG_COUNT != "immature") %>%
   mutate(propRet = EGG_COUNT_RETAIN/EGG_COUNT_COR * 100) %>% 
   group_by(RIVER_NO, RIVER, LAST_SPAWN) %>% summarise(n= n(), 
                                           m = round(mean(propRet), 1), 
                                           sd = round(sd(propRet), 1), 
                                           min = round(min(propRet), 1), 
                                           max = round(max(propRet), 1))
-
-
-filter(fecundityRaw, grepl("Conn|Expl|Flat|Indian|Pipers|Rocky|Terra", RIVER)) %>% 
-  mutate(eggs = if_else(!is.na(EGG_COUNT_RETAIN), EGG_COUNT_COR-EGG_COUNT_RETAIN, EGG_COUNT_COR),
-         method = if_else(!is.na(EGG_COUNT_RETAIN), "mature", STAGE_EGG_COUNT)) %>% 
-  count(RIVER, method)
-
-filter(fecundityRaw, !is.na(EGG_COUNT_RETAIN), STAGE_EGG_COUNT != "immature") %>%   ### DOUBLE CHECK THAT CONNE IMMATURE EGGS ARE NOT INCLUDED!!!!
-  mutate(propRet = EGG_COUNT_RETAIN/EGG_COUNT_COR * 100) %>% 
-  ggplot(aes(x = SAMPLE_DOY, y = propRet)) +
-  stat_summary(aes(yintercept = after_stat(y), x = 300, col = RIVER), fun = mean, geom = "hline", linewidth = 0.2) +
-  geom_jitter(aes(col = RIVER), shape = 1) +
-  # geom_smooth() +
-  scale_y_continuous(breaks = seq(0, 75, 5)) +
-  labs(y = "prop. retained (%)", x = "sample DOY")
-
 
 # 4. missing age data strategies spawning strategy summaries
 # 4. a) proportion of salmon missing RAGE or LAST_SPAWN
@@ -293,10 +266,6 @@ looM3 <- loo(M3)
 looM4 <- loo(M4)
 loo_compare(looM0, looM1, looM2, looM3, looM4)
 
-looM4 <- loo(topModel)
-looM4t <- loo(M4test)
-loo_compare(looM4, looM4t)
-
 
 # 4. select top model for subsequent summaries and plots
 # 5. a) identify top model
@@ -320,7 +289,7 @@ M4 <- readRDS("./models/M4.rds")
 
 # 1. obtain posterior distribution from top model for median-sized salmon
 # 1. a) bring in top model
-topModel <- readRDS("./Analysis/M4.rds")
+topModel <- readRDS("./models/M4.rds")
 # 1. b) centering and scaling parameters used prior to modelling
 FLcenter <- attr(fecundity$clFORK_LENGTH, "scaled:center")
 FLscale  <- attr(fecundity$clFORK_LENGTH, "scaled:scale")
@@ -331,8 +300,6 @@ FLmed <- group_by(fecundity, SIZE) %>%
 # 1. d) get predicted values from posterior distribution
 pred <- distinct(fecundity, RIVER_NO, RIVER, SIZE, STAGE_EGG_COUNT) %>%   # single value/river/size/maturity
   left_join(FLmed) %>%                                                    # add median FL values
-  # add_predicted_draws(topModel) %>%                                       # draw from posterior distribution
-  # mutate(EGG_COUNT_pred = exp(.prediction))                               # transform predicted fecundity
   add_epred_draws(topModel) %>%                                       # draw from posterior distribution
   mutate(EGG_COUNT_pred = exp(.epred))                                # transform predicted fecundity
 
@@ -344,16 +311,9 @@ group_by(pred, SIZE, STAGE_EGG_COUNT, RIVER) %>%
             text = paste(min(medEGGS), " (", RIVER[which.min(medEGGS)], ") to ", 
                          max(medEGGS), " (", RIVER[which.max(medEGGS)], ")", sep = ""))
 
-
 # 3. STAGE_EGG_COUNT coefficients with 95% credible intervals
 # 3. a) check model summary
 posterior_summary(topModel)
-# posterior_summary(topModel) %>% data.frame() %>%                        # obtain all coefficients
-#   rownames_to_column("STAGE_EGG_COUNT") %>% filter(grepl("STAGE", STAGE_EGG_COUNT)) %>%   # filter to STAGE_EGG_COUNTs
-#   mutate(across(where(is.numeric), ~round(., 2)),                       # round values to 2 decimal places
-#          STAGE_EGG_COUNT = str_sub(STAGE_EGG_COUNT, 18, -1),                              # shorten default nanmes
-#          CIs    = paste("(", Q2.5, "-", Q97.5, ")", sep = "")) %>%      # create string for Results text
-#   select(STAGE_EGG_COUNT, Estimate, CIs)
 # 3. b) conditional means (95% CIs) 
 as_draws_df(topModel) %>% dplyr::select(contains(c("b_Intercept", "b_STAGE_EGG_COUNT"))) %>%
   mutate(across(c(2:3), ~. + b_Intercept)) %>%
@@ -366,7 +326,7 @@ as_draws_df(topModel) %>% dplyr::select(contains(c("b_Intercept", "b_STAGE_EGG_C
          perc = round((max(mv) - mv) / max(mv), 2) * 100)
 
 # 4. posterior distribution density plot (within 95% quantiles) & median values as lines
-png("./Figures/Fig2.png", width = 7.5, height = 6, units = "in", res = 600)
+png("./figures/Fig2.png", width = 7.5, height = 6, units = "in", res = 600)
 group_by(pred, RIVER, SIZE, STAGE_EGG_COUNT) %>%
   filter(EGG_COUNT_pred >= quantile(EGG_COUNT_pred, probs = 0.025),       # filter <2.5% quantile
          EGG_COUNT_pred <= quantile(EGG_COUNT_pred, probs = 0.975)) %>%   # filter >97.5% quantile
@@ -379,8 +339,6 @@ group_by(pred, RIVER, SIZE, STAGE_EGG_COUNT) %>%
              col   = STAGE_EGG_COUNT)) +
   geom_boxplot(position = position_dodge(preserve = "single"),    # maintain same width across all boxes
                coef = NULL, alpha = 0.5) +                        # extent whiskers to min/max values (already within quantiles)
-  # scale_fill_viridis_d(option = "plasma") +
-  # scale_color_viridis_d(option = "plasma") +
   scale_fill_manual(values = pal3) + scale_color_manual(values = pal3) +
   scale_x_continuous(breaks = seq(1, 15, 1)) +
   facet_grid(~SIZE, scales = "free_x", space = "free_x",
@@ -405,21 +363,19 @@ for(i in 1:nrow(coefM4)) {
 }
 nrow(fl) * nrow(coefM4) == nrow(coefM4fl)  # check for sufficient rows
 # 5. c) calculate conditional fecundity at fork lengths
-names(coefM4fl)
 predF_FL <- coefM4fl %>% 
   mutate(lEGG_COUNT_pred = b_Intercept + clFORK_LENGTH * b_clFORK_LENGTH +  
            case_when(STAGE_EGG_COUNT == "immature" ~ 0,
                      STAGE_EGG_COUNT == "mature"   ~ b_STAGE_EGG_COUNTmature,
                      TRUE                          ~ b_STAGE_EGG_COUNTmaturePretained)) %>% 
   group_by(STAGE_EGG_COUNT, FORK_LENGTH) %>% 
-  # filter(lEGG_COUNT_pred > quantile(lEGG_COUNT_pred, probs = 0.025))
   summarise(EGG_COUNT_pred = round(exp(mean(lEGG_COUNT_pred)), 0),
             EGG_COUNT_lo = round(exp(quantile(lEGG_COUNT_pred, probs = 0.025)), 0),
             EGG_COUNT_hi = round(exp(quantile(lEGG_COUNT_pred, probs = 0.975)), 0)) %>% 
   mutate(across(contains("EGG"), ~./1000))
 
 # 6. Figure S1
-png("./Figures/FigS1.png", width = 7.5/2, height = 6/2, units = "in", res = 600)
+png("./figures/FigS1.png", width = 7.5/2, height = 6/2, units = "in", res = 600)
 ggplot(data = predF_FL, aes(x = FORK_LENGTH, y = EGG_COUNT_pred, 
                             col = STAGE_EGG_COUNT, fill = STAGE_EGG_COUNT)) +
   geom_ribbon(aes(ymin = EGG_COUNT_lo, ymax = EGG_COUNT_hi), 
@@ -462,9 +418,6 @@ count(fecundityCov, RIVER)                         # 20 rivers with min. 17 salm
 count(fecundityCov, STAGE_EGG_COUNT, RAGE)         # n = 1 for one combination
 count(fecundityCov, STAGE_EGG_COUNT, LAST_SPAWN)   # n = 2 for one combination
 count(fecundityCov, RAGE, LAST_SPAWN)              # n < 3 for six combination
-ggplot(fecundityCov, aes(x = cSAMPLE_DOY, fill = STAGE_EGG_COUNT)) +
-  geom_histogram()
-# 
 
 
 # 2. candidate models
@@ -617,19 +570,6 @@ round(exp(fRAGE1SW4) - exp(fRAGE1SW2), 0)
 round((exp(fRAGE1SW4) - exp(fRAGE1SW2)) / exp(fRAGE1SW2) * 100, 1)
 round(exp(fRAGE1SW6) - exp(fRAGE1SW4), 0)
 round((exp(fRAGE1SW6) - exp(fRAGE1SW4)) / exp(fRAGE1SW4) * 100, 1)
-# # 3. c) 2SW predicted fecundity at each smolt age
-# fRAGE2SW2 <- sumCovModel$Estimate[1] +
-#   sumCovModel$Estimate[sumCovModel$B == "b_LAST_SPAWN2"] +
-#   sumCovModel$Estimate[sumCovModel$B == "b_clFORK_LENGTH"] * FLmed$clFORK_LENGTH[FLmed$FORK_LENGTH == 76] +
-#   sumCovModel$Estimate[sumCovModel$B == "b_cFULTONS_K"]    * fixedK$cFULTONS_K +
-#   sumCovModel$Estimate[sumCovModel$B == "b_cSAMPLE_DOY"]   * fixedDOY$cSAMPLE_DOY[fixedDOY$STAGE_EGG_COUNT == "immature"]
-# fRAGE2SW4 <- fRAGE2 + sumCovModel$Estimate[sumCovModel$B == "b_fRAGE4"]
-# fRAGE2SW6 <- fRAGE2 + sumCovModel$Estimate[sumCovModel$B == "b_fRAGE6"]
-# # 3. d) 2SW differences in fecundity between smolt ages
-# round(exp(fRAGE4) - exp(fRAGE2), 0)
-# round(exp(fRAGE6) - exp(fRAGE4), 0)
-# round((exp(fRAGE4) - exp(fRAGE2)) / exp(fRAGE2) * 100, 1)
-# round((exp(fRAGE6) - exp(fRAGE4)) / exp(fRAGE4) * 100, 1)
 
 
 # 4. differences in fecundity by spawning strategy
@@ -780,10 +720,6 @@ round((exp(fSD2SW14m) - exp(fSD2SWm)) / exp(fSD2SWm) * 100, 1)
 
 
 # 7. FIGURE 3 - conditional means
-# conditional_effects(topCovModel, prob = 0.95, method = "posterior_epred", effects = "fRAGE")
-# conditional_effects(topCovModel, prob = 0.95, method = "posterior_epred", effects = "LAST_SPAWN")
-# conditional_effects(topCovModel, prob = 0.95, method = "posterior_epred", effects = "cFULTONS_K")#, spaghetti = TRUE)
-# conditional_effects(topCovModel, prob = 0.95, method = "posterior_epred", effects = "cSAMPLE_DOY")
 # 7. a) sample sizes for plots
 nRAGE       <- count(fecundityCov, RAGE)
 nLAST_SPAWN <- count(fecundityCov, LAST_SPAWN)
@@ -891,8 +827,6 @@ fecundityED <-  fecundity %>%
   group_by(RIVER) %>% 
   mutate(cEGG_DIAM_COR = scale(EGG_DIAM_COR)) %>% ungroup()   # center & scale egg diameter within rivers
 
-count(fecundityED, RIVER)
-
 # 2. egg diameter models
 # 2. a) base model
 M4ED <- brm(lEGG_COUNT_COR ~ 0 + Intercept + clFORK_LENGTH + STAGE_EGG_COUNT + (clFORK_LENGTH | RIVER),
@@ -948,7 +882,7 @@ sumEDModel <- posterior_summary(topEDModel) %>% data.frame() %>%
 
 
 # 2. conditional fecundity plot
-png("./Figures/Fig4.png", width = 7.5/2, height = 5/2, units = "in", res = 600)
+png("./figures/Fig4.png", width = 7.5/2, height = 5/2, units = "in", res = 600)
 as_draws_df(topEDModel) %>% select(b_Intercept, b_cEGG_DIAM_COR) %>% 
   reframe(EGG_DIAM_COR = seq(min(fecundityED$EGG_DIAM_COR), max(fecundityED$EGG_DIAM_COR), 
                              length.out = 30),
@@ -1012,8 +946,7 @@ round((exp(smED70) - exp(smED50)) / exp(smED50) * 100, 1)
 
 # 1. determine number of rives with fecundity data over at least two decades
 # 1. a) calculate residual fecundity
-summary(fecundityRes)
-fecundityRes <- fecundity %>% #filter(fecundity, SAMPLE_DATE_RANGE <= 5) %>%   # remove data without sample date
+fecundityRes <- fecundity %>%
   mutate(DECADE = round_any(YEAR, 10, f = floor)) %>%           # calculate decade
   dplyr::count(RIVER, DECADE) %>%                               # determine rivers with min. 15 obs/decade 
   filter(n >= 15) %>% 
@@ -1077,9 +1010,8 @@ plot(R2)
 # 3. leave-one-out cross-validation for model comparison
 # 3. a) re-run all models 
 looR0 <- loo(R0, moment_match = TRUE)
-looR1 <- loo(R1, moment_match = TRUE), reloo = TRUE)
+looR1 <- loo(R1, moment_match = TRUE)
 looR2 <- loo(R2, moment_match = TRUE)
-# looR3 <- loo(R3)
 # 3. b) initial comparison to determine if covariates improve the model
 loo_compare(looR0, looR1, looR2) #, looR3
 
@@ -1088,13 +1020,13 @@ loo_compare(looR0, looR1, looR2) #, looR3
 # 4. a) identify top model
 topRFModel <- R2
 # 4. b) save models as RDS files
-saveRDS(R0, "./Analysis/R0.rds")
-saveRDS(R1, "./Analysis/R1.rds")
-saveRDS(R2, "./Analysis/R2.rds")
+saveRDS(R0, "./models/R0.rds")
+saveRDS(R1, "./models/R1.rds")
+saveRDS(R2, "./models/R2.rds")
 # 4. c) read models from RDS files
-R0 <- readRDS("./Analysis/R0.rds")
-R1 <- readRDS("./Analysis/R1.rds")
-R2 <- readRDS("./Analysis/R2.rds")
+R0 <- readRDS("./models/R0.rds")
+R1 <- readRDS("./models/R1.rds")
+R2 <- readRDS("./models/R2.rds")
 
 
 
@@ -1110,7 +1042,7 @@ predRes <- distinct(fecundityRes) %>%
 
 
 # Figure 5
-png("./Figures/FigS2.png", width = 7.5, height = 5, units = "in", res = 600)
+png("./figures/Fig5.png", width = 7.5, height = 5, units = "in", res = 600)
 ggplot(data = predRes, aes(x = YEAR, y = .epred, col = DECADE)) +
   geom_hline(yintercept = 0, col = "grey90") +
   geom_boxplot(aes(group = YEAR)) +
@@ -1134,7 +1066,7 @@ basemap <- rnaturalearth::ne_states("canada")
 
   
 # 2. plot locations of rivers and DUs
-png("./Figures/Fig1.png", width = 4, height = 3.5, units = "in", res = 600)
+png("./figures/Fig1.png", width = 4, height = 3.5, units = "in", res = 600)
 distinct(fecundityRaw, DU, RIVER_NO, RIVER, LATITUDE, LONGITUDE) %>% 
   arrange(RIVER_NO) %>%
   ggplot() + 
@@ -1215,7 +1147,7 @@ coefM4se<- distinct(fecundity, RIVER) %>%
          βf = paste(RIVER.Estimate.clFORK_LENGTH, " (", 
                     RIVER.Est.Error.clFORK_LENGTH, ")", sep = ""))
 
-# 2. Table S2
+# 2. Table S3
 left_join(select(coefM4, -contains(".")),
           select(coefM4se, -contains(".")),
           by = "RIVER") %>% arrange(RIVER_NO) %>% 
